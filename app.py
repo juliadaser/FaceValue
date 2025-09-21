@@ -1,21 +1,17 @@
 import os
-from flask import Flask, render_template, send_from_directory, url_for
+from flask import Flask, render_template, url_for
 from flask_wtf import FlaskForm
 from flask_wtf.file import FileField, FileAllowed, FileRequired
 from wtforms import SubmitField
 from werkzeug.utils import secure_filename
 from deepface import DeepFace
+import base64
 
-# --- Flask setup ---
+# __Flask setup__
 app = Flask(__name__)
 app.config["SECRET_KEY"] = "randomstring"
 
-# Folder to save uploaded photos
-UPLOAD_FOLDER = "uploads"
-os.makedirs(UPLOAD_FOLDER, exist_ok=True)
-app.config["UPLOAD_FOLDER"] = UPLOAD_FOLDER
-
-# Reference folder with known images
+# Reference folder with money bills
 REFERENCE_DIR = "./static/bills_db"
 os.makedirs(REFERENCE_DIR, exist_ok=True)
 
@@ -30,12 +26,6 @@ class UploadForm(FlaskForm):
     submit = SubmitField("Upload")
 
 
-# --- Route to serve uploaded files ---
-@app.route("/uploads/<filename>")
-def get_file(filename):
-    return send_from_directory(app.config["UPLOAD_FOLDER"], filename)
-
-
 # --- Main route ---
 @app.route("/", methods=["GET", "POST"])
 def uploadimage():
@@ -44,22 +34,26 @@ def uploadimage():
     similarity_results = []
 
     if form.validate_on_submit():
-        # Save uploaded file
+        # Read user's selfie into memory
         file = form.photo.data
-        filename = secure_filename(file.filename)
-        save_path = os.path.join(app.config["UPLOAD_FOLDER"], filename)
-        file.save(save_path)
+        img_bytes = file.read()
 
-        file_url = url_for("get_file", filename=filename)
+        # Convert selfie base64 to display on webpage
+        file_url = "data:image/png;base64," + base64.b64encode(img_bytes).decode("utf-8")
 
-        # Collect valid reference images (only those with faces)
+        # Save selfie temporarily to disk just for DeepFace
+        temp_filename = f"temp_{secure_filename(file.filename)}"
+        with open(temp_filename, "wb") as f:
+            f.write(img_bytes)
+
+        # Collect money bills (only those where faces can be detected)
         reference_images = [
             os.path.join(REFERENCE_DIR, f)
             for f in os.listdir(REFERENCE_DIR)
             if f.lower().endswith((".png", ".jpg", ".jpeg"))
         ]
 
-        valid_images = []
+        valid_images = [] #valid money bills
         for img_path in reference_images:
             try:
                 _ = DeepFace.represent(img_path=img_path, model_name="VGG-Face")
@@ -67,12 +61,12 @@ def uploadimage():
             except Exception:
                 print(f"Skipping {img_path}, no face detected.")
 
-        # Compare uploaded image against valid reference images
+        # Compare selfie against list of valid money bills
         results = []
         for ref_img in valid_images:
             try:
                 result = DeepFace.verify(
-                    img1_path=save_path,
+                    img1_path=temp_filename,
                     img2_path=ref_img,
                     model_name="VGG-Face",
                 )
@@ -80,6 +74,9 @@ def uploadimage():
                 results.append((os.path.basename(ref_img), similarity))
             except Exception as e:
                 print(f"Error comparing {ref_img}: {e}")
+
+        # Delete user's selfie
+        os.remove(temp_filename)
 
         # Sort results by similarity
         similarity_results = sorted(results, key=lambda x: x[1], reverse=True)
