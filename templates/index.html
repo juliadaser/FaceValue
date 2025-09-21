@@ -1,0 +1,34 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Face Value</title>
+</head>
+<body>
+    <form method="post" enctype="multipart/form-data">
+        {{form.hidden_tag()}}
+        {% for error in form.photo.errors %}
+            <span style="color:red">{{error}}</span>
+        {%endfor%}
+        <div>
+            <div>
+                {{form.photo()}}
+            </div>
+            <div>
+                {{form.submit()}}
+            </div>
+        </div>
+    </form>
+
+    {% if file_url %}
+        <div>
+            <img src="{{ file_url }}" style="width: 300px">
+        </div>
+    {% endif %} 
+
+    {% if similarity is not none %}
+        <p>Similarity: {{ (similarity * 100) | round(2) }}%</p>
+    {% endif %}
+</body>
+</html>
