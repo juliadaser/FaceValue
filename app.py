@@ -1,80 +1,97 @@
-import re
 import os
-from datetime import datetime
 from flask import Flask, render_template, send_from_directory, url_for
-from flask_uploads import UploadSet, IMAGES, configure_uploads
 from flask_wtf import FlaskForm
 from flask_wtf.file import FileField, FileAllowed, FileRequired
 from wtforms import SubmitField
+from werkzeug.utils import secure_filename
 from deepface import DeepFace
 
+# --- Flask setup ---
 app = Flask(__name__)
-app.config["SECRET_KEY"] = 'randomstring'
-app.config["UPLOADED_PHOTOS_DEST"] = 'uploads' #name of created folder
+app.config["SECRET_KEY"] = "randomstring"
 
-photos = UploadSet('photos', IMAGES) # pictures the user uploads
-configure_uploads(app, photos)
+# Folder to save uploaded photos
+UPLOAD_FOLDER = "uploads"
+os.makedirs(UPLOAD_FOLDER, exist_ok=True)
+app.config["UPLOAD_FOLDER"] = UPLOAD_FOLDER
 
-REFERENCE_DIR = "./static/bills_db" # folder of bills
-reference_images = [
-    os.path.join(REFERENCE_DIR, f)
-    for f in os.listdir(REFERENCE_DIR)
-    if f.lower().endswith((".png", ".jpg", ".jpeg"))
-]
+# Reference folder with known images
+REFERENCE_DIR = "./static/bills_db"
+os.makedirs(REFERENCE_DIR, exist_ok=True)
 
-valid_images = [] # for some reason, a face is not detected on all bills!! Therefore, create a new list of bills that are recognized by deepface
-for img_path in reference_images:
-    try:
-        _ = DeepFace.represent(img_path=img_path, model_name="VGG-Face")
-        valid_images.append(img_path)
-    except Exception as e:
-        print(f"Skipping {img_path}, no face detected.")
-
+# --- Form definition ---
 class UploadForm(FlaskForm):
     photo = FileField(
-        validators = {
-            FileAllowed(photos, "Only images are allowed"),
-            FileRequired('File Field should not be empty')
-
-        }
+        validators=[
+            FileAllowed(["jpg", "jpeg", "png"], "Only images are allowed"),
+            FileRequired("File field should not be empty"),
+        ]
     )
-    submit = SubmitField('upload')
+    submit = SubmitField("Upload")
 
 
+# --- Route to serve uploaded files ---
 @app.route("/uploads/<filename>")
 def get_file(filename):
-    return send_from_directory(app.config["UPLOADED_PHOTOS_DEST"], filename)
+    return send_from_directory(app.config["UPLOAD_FOLDER"], filename)
 
 
-
-@app.route("/", methods=['GET', 'POST'])
+# --- Main route ---
+@app.route("/", methods=["GET", "POST"])
 def uploadimage():
     form = UploadForm()
-    similarity = None
-    if form.validate_on_submit(): # if photo is submitted and contains no errors
-        filename = photos.save(form.photo.data)
-        file_url = url_for('get_file', filename=filename)
+    file_url = None
+    similarity_results = []
 
-        # Path to uploaded file
-        uploaded_path = os.path.join(app.config["UPLOADED_PHOTOS_DEST"], filename)
-        # Path to reference image
-        reference_path = "static/reference.png"
+    if form.validate_on_submit():
+        # Save uploaded file
+        file = form.photo.data
+        filename = secure_filename(file.filename)
+        save_path = os.path.join(app.config["UPLOAD_FOLDER"], filename)
+        file.save(save_path)
 
-        # Run DeepFace verification
-        result = DeepFace.verify(
-            img1_path=uploaded_path,
-            img2_path=reference_path,
-            model_name="VGG-Face",  # default, but you can try "Facenet", "ArcFace", etc.
-        )
+        file_url = url_for("get_file", filename=filename)
 
-        similarity = 1 - result["distance"]
+        # Collect valid reference images (only those with faces)
+        reference_images = [
+            os.path.join(REFERENCE_DIR, f)
+            for f in os.listdir(REFERENCE_DIR)
+            if f.lower().endswith((".png", ".jpg", ".jpeg"))
+        ]
 
-        print("Verification result:", result)
-        print("Similarity score:", similarity)
+        valid_images = []
+        for img_path in reference_images:
+            try:
+                _ = DeepFace.represent(img_path=img_path, model_name="VGG-Face")
+                valid_images.append(img_path)
+            except Exception:
+                print(f"Skipping {img_path}, no face detected.")
 
-    else:
-        file_url = None
-    return render_template("index.html", form=form, file_url=file_url, similarity=similarity) # sending info back to frontend
+        # Compare uploaded image against valid reference images
+        results = []
+        for ref_img in valid_images:
+            try:
+                result = DeepFace.verify(
+                    img1_path=save_path,
+                    img2_path=ref_img,
+                    model_name="VGG-Face",
+                )
+                similarity = 1 - result["distance"]  # similarity score
+                results.append((os.path.basename(ref_img), similarity))
+            except Exception as e:
+                print(f"Error comparing {ref_img}: {e}")
 
-if __name__ == '__main__':
+        # Sort results by similarity
+        similarity_results = sorted(results, key=lambda x: x[1], reverse=True)
+
+    return render_template(
+        "index.html",
+        form=form,
+        file_url=file_url,
+        similarity_results=similarity_results,
+    )
+
+
+# --- Run app ---
+if __name__ == "__main__":
     app.run(debug=True)

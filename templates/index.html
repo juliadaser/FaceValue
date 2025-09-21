@@ -27,8 +27,16 @@
         </div>
     {% endif %} 
 
-    {% if similarity is not none %}
-        <p>Similarity: {{ (similarity * 100) | round(2) }}%</p>
-    {% endif %}
+    {% if similarity_results %}
+    <h3>Top Matches:</h3>
+    <ul>
+        {% for ref_img, score in similarity_results %}
+            <li>
+                <img src="{{ url_for('static', filename='bills_db/' + ref_img.split('/')[-1]) }}" style="width:200px">
+                {{ (score * 100) | round(2) }}%
+            </li>
+        {% endfor %}
+    </ul>
+{% endif %}
 </body>
 </html>
