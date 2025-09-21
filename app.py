@@ -68,7 +68,7 @@ def uploadimage():
                 result = DeepFace.verify(
                     img1_path=temp_filename,
                     img2_path=ref_img,
-                    model_name="VGG-Face",
+                    model_name="Facenet",
                 )
                 similarity = 1 - result["distance"]  # similarity score
                 results.append((os.path.basename(ref_img), similarity))
